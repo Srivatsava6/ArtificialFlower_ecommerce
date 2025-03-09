@@ -1,0 +1,1147 @@
+---
+title: "Data-Driven Insights for Artificial Flower E-Commerce: A Comprehensive Analysis with R and Python"
+author: "Srivatsava Chinnasamy Kamaraj"
+format:
+  html:
+    toc: true
+    toc-depth: 4
+    number-sections: true
+    embed-resources: true
+execute:
+  echo: true
+  warning: false
+  error: false
+bibliography: references.bib
+---
+
+
+## **Introduction**
+
+### **Business Problem and Relevance**
+
+The global e-commerce market has experienced exponential growth, with online platforms enabling businesses to connect with consumers worldwide. The **artificial flower industry** is no exception, with suppliers competing on factors like **pricing, order quantity, supplier experience, and verification status**. However, **without data-driven insights, businesses struggle to optimize supplier selection and pricing strategies**, leading to missed opportunities for growth.
+
+This study focuses on **analyzing supplier performance, pricing trends, and customer engagement factors** using a dataset from **Kaggle** ([Artificial Flower E-Commerce Dataset](https://www.kaggle.com/datasets/shahriarkabir/artificial-flower-ecommerce-dataset)). By leveraging **statistical analysis and visualization techniques**, I aim to uncover **key business insights that can help suppliers and e-commerce platforms improve decision-making**.
+
+------------------------------------------------------------------------
+
+### **Objectives**
+
+This project aims to address the following key **business questions**:
+
+1.  **Supplier Performance:** Which suppliers receive the highest order quantities, and what factors contribute to their success?
+2.  **Pricing Strategies:** How do suppliers price their products, and does price impact order quantity?
+3.  **Verification Status Impact:** Do **verified** suppliers receive **higher order volumes** than non-verified ones?
+4.  **Country-Wise Supplier Dominance:** Which countries have the most **high-volume** suppliers?
+5.  **Supplier Experience & Growth:** Does a supplier’s **years in business** affect order quantity?
+6.  **Statistical Validation:** How do pricing, supplier rating, and review count correlate with sales?
+
+By answering these questions, this project will provide **actionable insights for suppliers, buyers, and e-commerce platforms**.
+
+------------------------------------------------------------------------
+
+### **Methodology**
+
+To ensure a **structured, reproducible, and data-driven approach**, I followed these steps:
+
+1.  **Data Acquisition & Preparation**:
+    -   Retrieved data from **Kaggle**.
+    -   Performed **data cleaning, missing value imputation, and feature extraction**.
+    -   Standardized **supplier names, order quantities, and pricing** for consistency.
+2.  **Exploratory Data Analysis (EDA)**:
+    -   Used **descriptive statistics and visualizations** to identify patterns in supplier performance, order distribution, and pricing.
+    -   Examined **supplier verification status, review counts, and supplier country**.
+3.  **Business Analytics (Statistical Methods)**:
+    -   **Correlation Analysis**: Identified relationships between price, rating, review count, and order quantity.
+    -   **T-Test**: Checked if verified suppliers receive more orders than non-verified ones.
+    -   **ANOVA**: Analyzed differences in order quantity based on supplier experience level.
+4.  **Integration with Python (Quarto)**:
+    -   Implemented **cross-language analysis** using Python for data transformation and visualization.
+5.  **Database Storage (SQLite)**:
+    -   Stored the cleaned dataset in an **SQLite database** for efficient query-based analysis.
+6.  **Business Insights & Recommendations**:
+    -   Derived insights on **pricing strategies, supplier trust factors, and customer behavior**.
+    -   Formulated **strategic recommendations** for suppliers to optimize their pricing and sales approach.
+
+------------------------------------------------------------------------
+
+### **Expected Outcomes**
+
+This study will produce:\ 
+**A comprehensive data-driven report** highlighting supplier performance and pricing strategies.\
+**Statistical validation of key business trends** using T-Tests, ANOVA, and correlation analysis.\
+**Actionable recommendations for suppliers and e-commerce platforms** to improve sales and pricing strategies.\
+**A structured, reproducible analytical pipeline** that integrates R and Python for business analytics.
+
+By applying **data analytics techniques**, this study contributes to a **better understanding of supplier dynamics in the artificial flower e-commerce industry**, enabling businesses to make informed decisions.
+
+------------------------------------------------------------------------
+
+## **Packages**
+
+### **Load Required Libraries**
+
+```{r}
+# Data Manipulation and Processing
+library(tidyverse)   
+library(dplyr)       
+library(stringr)     
+
+# Data Visualization
+library(ggplot2)     
+library(plotly)      
+library(gt)          
+
+# Statistical Analysis
+library(car)         
+library(reshape2)    
+
+# Database Management
+library(DBI)         
+library(RSQLite)     
+
+# Python Integration with R
+library(reticulate)  
+
+```
+### **Citations**
+
+[@tidyverse][@dplyr][@stringr][@ggplot2][@plotly][@gt][@car][@reshape2][@DBI][@RSQLite][@reticulate]
+
+## **Data Preparation**
+
+###**Load and Inspect the Dataset**
+
+```{r}
+# Load dataset
+df <- read.csv("Artificial_Flower_Ecommerce_Data.csv", stringsAsFactors = FALSE)
+
+# Convert empty strings to NA
+df[df == ""] <- NA
+
+# Check dataset structure
+str(df)
+glimpse(df)
+
+# Summary statistics
+summary(df)
+
+# Check for missing values
+if (nrow(df) > 0) {
+  missing_values <- colSums(is.na(df))
+  print(missing_values)
+  
+  missing_percentage <- missing_values / nrow(df) * 100
+  print(missing_percentage)
+} else {
+  message("Dataset is empty. Cannot calculate missing values.")
+}
+```
+
+### **Understanding the Data**
+
+The dataset consists of **4,803 rows and 8 columns**, representing various aspects of artificial flower e-commerce data. Most columns are text-based and require conversion for proper analysis.
+
+### **Missing Values Overview**
+
+-   **order_quantity** has **2,461 missing values** (**51.3%**) requiring imputation.
+-   **verification_status** has **3,304 missing values** (**68.8%**) and will be replaced with "Not Verified".
+
+### **Categorical vs. Numerical Data**
+
+-   **Categorical Columns:** products_name, supplier_name, verification_status, supplier_info, delivery_info.
+-   **Columns Requiring Numeric Conversion:** prices (split into min_price & max_price), order_quantity, years_in_business, supplier_rating.
+
+### **Handling Missing Values**
+
+```{r}
+# Function to handle missing verification_status
+handle_verification_status <- function(data) {
+  data |> 
+    mutate(verification_status = replace_na(verification_status, "Not Verified"))
+}
+
+# Function to handle missing order_quantity using median or mean
+handle_order_quantity <- function(data) {
+  data$order_quantity <- as.numeric(gsub("[^0-9]", "", data$order_quantity))
+  order_quantity_no_na <- na.omit(data$order_quantity)
+  
+  order_quantity_skewness <- shapiro.test(order_quantity_no_na)
+  
+  imputed_value <- ifelse(order_quantity_skewness$p.value >= 0.05, 
+                          mean(order_quantity_no_na, na.rm = TRUE), 
+                          median(order_quantity_no_na, na.rm = TRUE))
+  
+  data |> 
+    mutate(order_quantity = ifelse(is.na(order_quantity), imputed_value, order_quantity))
+}
+
+# Apply the functions
+df <- df |> 
+  handle_verification_status() |> 
+  handle_order_quantity()
+
+# Check missing values handled
+df |> summarise(across(everything(), ~sum(is.na(.))))
+
+df |> 
+  select(verification_status, order_quantity) |>  
+  head(10)
+```
+
+#### **Explanation of Handling Missing Values**
+
+-   **verification_status**: Replaced missing values with "Not Verified".
+-   **order_quantity**: Extracted numeric values, checked normality using **Shapiro-Wilk test**, and imputed with **mean** (if normal) or **median** (if skewed).
+
+This approach ensures clean and structured data, ready for further analysis.
+
+### **Extracting and Converting Prices**
+
+```{r}
+extract_prices <- function(data) {
+  tryCatch({
+    # Fix price extraction by splitting values and handling numeric conversion
+df <- df |> mutate(
+  prices = gsub("US\\$", "", prices),  # Remove 'US$'
+  prices = gsub(",", "", prices),  # Remove commas
+  min_price = as.numeric(str_extract(prices, "^[0-9]+\\.?[0-9]*")),  # Extract first price
+  max_price = as.numeric(str_extract(prices, "(?<=- )[0-9]+\\.?[0-9]*")),  # Extract second price
+  max_price = ifelse(is.na(max_price), min_price, max_price)  # If max is missing, set to min
+)
+
+      
+  }, error = function(e) {
+    message("Error in extract_prices(): ", e$message)
+    return(data)
+  })
+}
+
+# Apply function
+suppressWarnings(suppressMessages({
+  df <- extract_prices(df)
+}))
+
+# Check for missing values
+df |> summarise(min_price_na = sum(is.na(min_price)), max_price_na = sum(is.na(max_price)))
+df |> select(prices, min_price, max_price) |> head(10)
+```
+
+#### **Explanation for Extracting and Converting Prices**
+
+In the **Extracting and Converting Prices** section, we focused on cleaning and extracting relevant numerical information from the `prices` column, which contains values in the format **"US**$min_price - US$max_price". The process involves:
+
+1.  **Removing the 'US\$' symbol** from the `prices` column to facilitate numeric conversion.
+2.  **Extracting the minimum price** from the string using regular expressions (`str_extract`).
+3.  **Extracting the maximum price** from the string, and if missing, assigning the value of the **minimum price** to ensure consistency in the data.
+
+This ensures that we have valid numerical values for both **min_price** and **max_price**, making the dataset suitable for analysis, such as price comparison and trend analysis.
+
+### **Converting Years in Business**
+
+```{r}
+convert_years_in_business <- function(data) {
+  data |> 
+    mutate(years_in_business = as.numeric(str_extract(years_in_business, "[0-9]+")))
+}
+
+# Apply function
+df <- convert_years_in_business(df)
+
+# Check for missing values
+df |> summarise(years_in_business_na = sum(is.na(years_in_business)))
+df |> select(years_in_business) |> head(10)
+
+```
+
+#### **Explanation for Converting Years in Business**
+
+In the **Converting Years in Business** section, we focused on extracting the numeric values from the `years_in_business` column, which contains text like **"5 yrs"** or **"2 yrs"**. The process involves:
+
+1.  **Extracting the numeric value** (e.g., `5` from `"5 yrs"`) using a regular expression (`str_extract`).
+2.  **Converting the extracted values** into a numeric format to prepare the data for analysis.
+
+### **Standardize supplier name**
+
+```{r}
+standardize_supplier_name <- function(data) {
+  data |> mutate(supplier_name = str_trim(tolower(supplier_name)))
+}
+
+# Apply function
+df <- standardize_supplier_name(df)
+
+
+```
+
+#### **Explanation Standardizing Supplier Name**
+
+In the **Standardizing Supplier Name** section, we ensure uniformity in supplier names to **avoid duplicates and inconsistencies** in data analysis. Supplier names may have **capitalization differences, extra spaces, or slight spelling variations**, which can affect grouping and aggregation.
+
+The process involves: 1. **Converting all supplier names to lowercase** to standardize text formatting. 2. **Trimming extra spaces** from names using `str_trim()`, ensuring consistency.
+
+### **Extracting minimum order quantity**
+
+```{r}
+extract_min_order_quantity <- function(data) {
+  data |> mutate(min_order_quantity = as.numeric(str_extract(delivery_info, "(?<=Min\\. order: )[0-9]+")))
+}
+
+# Apply function
+df <- extract_min_order_quantity(df)
+
+```
+
+#### **Explanation**
+
+In the **Extracting Minimum Order Quantity** section, we focus on retrieving the minimum order quantity from the `delivery_info` column. This column contains text data such as:
+
+Since the **minimum order quantity is embedded in text**, we extract it using **regular expressions**.
+
+**The process involves:** 1. **Identifying and extracting the numeric value** that appears after `"Min. order:"` using `str_extract()`. 2. **Converting the extracted value into a numeric format** for further analysis.
+
+### **Extracting Supplier Rating, Country & Review Count**
+
+```{r}
+
+extract_supplier_details <- function(data) {
+  data |> mutate(
+    supplier_rating = as.numeric(str_extract(supplier_info, "[0-9]\\.[0-9](?=/5\\.0)")),  # Extract rating (e.g., 4.8 from "4.8/5.0")
+    review_count = as.numeric(str_extract(supplier_info, "(?<=\\()[0-9]+(?=\\))")),  # Extract review count (e.g., 82 from "(82)")
+    supplier_country = str_extract(supplier_info, "(?<=yrs?)[A-Z]+")  # Extract country code (e.g., "CN" from "5 yrsCN")
+  )
+}
+
+# Apply function
+df <- extract_supplier_details(df)
+
+```
+
+#### **Explanation**
+
+The `supplier_info` column contains multiple pieces of information, including **supplier rating, review count, and country**. Extracting these details allows for structured analysis.
+
+**Key Actions:** - **Supplier Rating:** Extracts numeric rating (e.g., `4.8` from `"4.8/5.0"`) for performance analysis. - **Review Count:** Retrieves the number of customer reviews (e.g., `82` from `"(82)"`) to measure supplier credibility. - **Supplier Country:** Extracts country code (e.g., `"CN"` from `"5 yrsCN"`) for regional comparisons.
+
+### **Verify Transformations**
+
+```{r}
+df |> select(supplier_name, min_order_quantity, supplier_rating, review_count,supplier_country) |> head(10)
+
+```
+
+```{r}
+# Checking for missing values across all columns
+df |> summarise(across(everything(), ~sum(is.na(.))))
+```
+
+**we have 847 NA values in supplier_rating and review_count** Extracted numeric values, checked normality using **Shapiro-Wilk test**, and imputed with **mean** (if normal) or **median** (if skewed).
+
+```{r}
+# Function to handle missing supplier_rating and review_count using Shapiro-Wilk test
+handle_supplier_details <- function(data) {
+  # Removing NAs before performing normality test
+  supplier_rating_no_na <- na.omit(data$supplier_rating)
+  review_count_no_na <- na.omit(data$review_count)
+  
+  # Perform Shapiro-Wilk test for normality
+  supplier_rating_shapiro <- shapiro.test(supplier_rating_no_na)
+  review_count_shapiro <- shapiro.test(review_count_no_na)
+  
+  # Determine imputation value based on normality test
+  rating_imputed <- ifelse(supplier_rating_shapiro$p.value >= 0.05, 
+                           mean(supplier_rating_no_na, na.rm = TRUE), 
+                           median(supplier_rating_no_na, na.rm = TRUE))
+  
+  review_imputed <- ifelse(review_count_shapiro$p.value >= 0.05, 
+                            mean(review_count_no_na, na.rm = TRUE), 
+                            median(review_count_no_na, na.rm = TRUE))
+  
+  # Impute missing values
+  data |> 
+    mutate(
+      supplier_rating = ifelse(is.na(supplier_rating), rating_imputed, supplier_rating),
+      review_count = ifelse(is.na(review_count), review_imputed, review_count)
+    )
+}
+
+# Apply the function
+df <- handle_supplier_details(df)
+
+# Check missing values after imputation
+df |> summarise(
+  supplier_rating_na = sum(is.na(supplier_rating)),
+  review_count_na = sum(is.na(review_count))
+)
+
+# Verify the updated dataset
+# Checking for missing values across all columns
+df |> summarise(across(everything(), ~sum(is.na(.))))
+
+```
+
+```{r}
+# Convert verification_status into a factor
+df <- df |> mutate(verification_status = as.factor(verification_status))
+
+str(df$verification_status)  # Check structure of verification_status
+
+```
+
+```{r}
+nrow(df)  # Check total rows before removing duplicates
+df <- df |> distinct()  # Remove duplicate rows
+nrow(df)  # Check total rows after removing duplicates
+
+
+```
+
+```{r}
+# Remove unwanted columns
+df <- df |> select(-prices, -delivery_info, -supplier_info)
+
+# Confirm the updated dataset structure
+str(df)
+
+```
+
+```{r}
+summary(df)
+
+```
+
+## **More Feature Engineering**
+
+### **Create Price Features**
+
+```{r}
+# Load the cleaned dataset
+df <- read.csv("Cleaned_Artificial_Flower_Data.csv")
+
+# Create price spread and average price
+df <- df |>
+  mutate(
+    price_spread = max_price - min_price,
+    avg_price = (min_price + max_price) / 2
+  )
+```
+
+**Insights:** - `price_spread` helps understand how much suppliers vary their prices. - `avg_price` simplifies analysis by providing a single metric instead of two separate columns.
+
+------------------------------------------------------------------------
+
+### **Categorize Supplier Experience**
+
+```{r}
+# Categorizing years in business
+df <- df |>
+  mutate(
+    experience_category = case_when(
+      years_in_business < 3 ~ "New",
+      years_in_business >= 3 & years_in_business <= 7 ~ "Growing",
+      years_in_business > 7 ~ "Established"
+    )
+  )
+```
+
+**Insights:** - Instead of treating `years_in_business` as a continuous variable, grouping it into categories helps in comparisons. - This is useful for ANOVA and understanding the impact of supplier experience on sales.
+
+------------------------------------------------------------------------
+
+### **Log Transform Order Quantity**
+
+```{r}
+# Apply log transformation to order quantity
+df <- df |>
+  mutate(log_order_quantity = log1p(order_quantity))
+```
+
+**Insights:** - `order_quantity` is highly skewed; some products have very high order counts. - Log transformation normalizes the distribution, making statistical tests and regression models more reliable.
+
+------------------------------------------------------------------------
+
+```{r}
+# display df
+str(df)
+```
+
+```{r}
+# Write the cleaned dataset to a CSV file
+write.csv(df, "Cleaned_Artificial_Flower_Data1.csv", row.names = FALSE)
+
+```
+## **Exploratory Data Analysis**
+### **Exploring Data Distribution with Boxplots**
+
+To understand the spread of key numerical variables and detect potential outliers, we use boxplots for: - **Order Quantity** - **Min Price** - **Max Price** - **Order Quantity by Supplier Rating**
+
+#### **Boxplots with Tabset for Interactive Viewing**
+
+::: panel-tabset
+#### **Boxplot: Order Quantity**
+
+```{r}
+ggplot(df, aes(y = order_quantity)) +
+  geom_boxplot(fill = "lightblue", outlier.color = "red") +
+  labs(title = "Boxplot of Order Quantity", y = "Order Quantity") +
+  theme_minimal()
+```
+
+#### **Boxplot: Order Quantity by Supplier Rating**
+
+```{r}
+ggplot(df, aes(x = as.factor(supplier_rating), y = order_quantity)) +
+  geom_boxplot(fill = "purple", outlier.color = "red") +
+  labs(title = "Boxplot of Order Quantity by Supplier Rating", x = "Supplier Rating", y = "Order Quantity") +
+  theme_minimal()
+```
+
+#### **Boxplot: Min Price**
+
+```{r}
+ggplot(df, aes(y = min_price)) +
+  geom_boxplot(fill = "lightgreen", outlier.color = "red") +
+  labs(title = "Boxplot of Min Price", y = "Min Price") +
+  theme_minimal()
+```
+
+#### **Boxplot: Max Price**
+
+```{r}
+ggplot(df, aes(y = max_price)) +
+  geom_boxplot(fill = "orange", outlier.color = "red") +
+  labs(title = "Boxplot of Max Price", y = "Max Price") +
+  theme_minimal()
+```
+:::
+
+**Insights from Boxplots**
+
+-   **Order Quantity:**
+    -   Extreme outliers in order quantity indicate that some suppliers receive very high order volumes.
+    -   The median order quantity is relatively low, meaning most suppliers receive small to moderate orders.
+    -   The log transformation applied earlier helps normalize this skewed distribution.
+-   **Min Price:**
+    -   Some suppliers list very low prices, possibly as promotional or bulk discounts.
+    -   A wide variation in min prices suggests different pricing strategies among suppliers.
+    -   Presence of outliers indicates extreme low-cost products that may require further analysis.
+-   **Max Price:**
+    -   Significant variation in max prices shows different pricing tiers (retail vs. bulk pricing).
+    -   Some suppliers set high max prices, likely for premium artificial flowers.
+    -   Outliers in max price suggest some suppliers inflate their max price significantly.
+-   **Order Quantity by Supplier Rating:**
+    -   Higher supplier ratings do not necessarily guarantee higher order quantities.
+    -   Wide spread of order quantity within each rating level suggests that other factors influence sales volume.
+    -   Some low-rated suppliers still receive large orders, potentially due to competitive pricing or other business strategies.
+
+### **Exploring Data Distribution with Histograms**
+
+To further analyze data distribution, we use histograms for: - **Order Quantity** - **Min Price** - **Max Price** - **Log-Transformed Order Quantity**
+
+#### **Histograms with Tabset for Interactive Viewing**
+
+::: panel-tabset
+#### **Histogram for Order Quantity**
+
+```{r}
+ggplot(df, aes(x = order_quantity)) +
+  geom_histogram(bins = 50, fill = "blue", alpha = 0.7) +
+  labs(title = "Distribution of Order Quantity", x = "Order Quantity", y = "Count") +
+  theme_minimal()
+```
+
+#### **Histogram for Min Price**
+
+```{r}
+ggplot(df, aes(x = min_price)) +
+  geom_histogram(bins = 50, fill = "lightgreen", alpha = 0.7) +
+  labs(title = "Distribution of Min Price", x = "Min Price", y = "Count") +
+  theme_minimal()
+```
+
+#### **Histogram for Max Price**
+
+```{r}
+ggplot(df, aes(x = max_price)) +
+  geom_histogram(bins = 50, fill = "orange", alpha = 0.7) +
+  labs(title = "Distribution of Max Price", x = "Max Price", y = "Count") +
+  theme_minimal()
+```
+
+#### **Histogram for Log-Transformed Order Quantity**
+
+```{r}
+ggplot(df, aes(x = log_order_quantity)) +
+  geom_histogram(bins = 50, fill = "purple", alpha = 0.7) +
+  labs(title = "Distribution of Log-Transformed Order Quantity", x = "Log(Order Quantity)", y = "Count") +
+  theme_minimal()
+```
+:::
+
+**Insights from Histograms**
+
+-   **Order Quantity:**
+    -   The raw order quantity is highly right-skewed, confirming the presence of large order outliers.
+    -   Log transformation helps normalize the distribution, making it better suited for statistical analysis.
+-   **Min Price:**
+    -   Most suppliers list very low minimum prices, with a sharp drop-off as prices increase.
+    -   A significant number of suppliers set their minimum prices close to zero, aligning with boxplot insights that showed extreme low-price outliers.
+-   **Max Price:**
+    -   Prices vary greatly, and a small number of suppliers have extremely high maximum prices.
+    -   The long right tail in the max price histogram suggests that some suppliers charge premium prices, confirming the variability seen in the boxplot.
+
+## **Correlation Analysis**
+
+To understand relationships between numerical variables, we compute and visualize a **correlation matrix**. This helps identify key factors influencing **order quantity** and pricing behavior.
+
+### **Interactive Correlation Heatmap**
+
+```{r}
+library(ggplot2)
+library(reshape2)
+library(plotly)
+
+# Compute correlation matrix
+cor_matrix <- cor(df |> select(where(is.numeric)), use = "complete.obs")
+cor_long <- melt(cor_matrix)
+
+# Create interactive heatmap
+p <- ggplot(cor_long, aes(Var1, Var2, fill = value)) +
+  geom_tile() +
+  geom_text(aes(label = round(value, 2)), color = "black", size = 3) +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0, limit = c(-1,1), space = "Lab") +
+  theme_minimal() +
+  labs(title = "Correlation Heatmap of Numeric Features")
+
+# Convert ggplot to interactive plotly chart
+ggplotly(p)
+```
+
+**Insights from Correlation Analysis**
+
+-   **Review Count has the strongest correlation with Order Quantity (\~0.15)** → Suggesting **customer engagement drives sales more than price or rating**.
+-   **Years in Business has a weak correlation with Order Quantity (\~0.067)** but a stronger correlation with **Review Count (\~0.32)**, meaning **older suppliers attract more reviews but not necessarily higher sales**.
+-   **Price (Min/Max) shows minimal correlation with Order Quantity** → Suggesting that **pricing alone does not dictate sales volume**.
+-   **Supplier Rating has little impact on Order Quantity** → Confirming that **higher-rated suppliers do not necessarily receive more orders**.
+
+
+## **Data Analysis and Insights**
+
+We now analyze key business questions using visualizations and summary statistics.
+
+### **1️⃣ What is the distribution of order quantities across different suppliers?**
+
+```{r}
+library(ggplot2)
+
+# Visualizing Order Quantity Distribution by Supplier
+ggplot(df, aes(x = supplier_name, y = order_quantity)) +
+  geom_boxplot(fill = "lightblue", outlier.color = "red") +
+  labs(title = "Order Quantity Distribution Across Suppliers",
+       x = "Supplier",
+       y = "Order Quantity") +
+  theme(axis.text.x = element_blank())
+```
+
+**Insights:** - Most suppliers receive **low-to-moderate order quantities**. - Some suppliers have significantly **higher order volumes**, indicating potential **top-performing sellers**. - Outliers suggest **extreme sales cases**, which may be worth investigating separately.
+
+------------------------------------------------------------------------
+
+### **2️⃣ Do verified suppliers receive more orders compared to non-verified suppliers?**
+
+```{r}
+# Boxplot: Order Quantity by Verification Status
+ggplot(df, aes(x = verification_status, y = order_quantity, fill = verification_status)) +
+  geom_boxplot(outlier.color = "red") +
+  labs(title = "Order Quantity by Supplier Verification Status",
+       x = "Verification Status",
+       y = "Order Quantity") +
+  theme_minimal()
+```
+
+**Insights:** - No significant difference in order quantity between **verified & non-verified** suppliers. - Both verified and non-verified suppliers have **outliers**, suggesting that verification **is not a strong indicator of sales volume**. - This aligns with the **correlation analysis**, where verification status showed a weak correlation with order quantity.
+
+------------------------------------------------------------------------
+
+### **3️⃣ Which country has the highest average order quantity?**
+
+```{r}
+library(gt)
+
+# Average Order Quantity by Country
+df |> 
+  group_by(supplier_country) |> 
+  summarise(avg_order_quantity = mean(order_quantity)) |> 
+  arrange(desc(avg_order_quantity)) |> 
+  head(10) |> 
+  gt() |> 
+  tab_header(title = "Top 10 Countries by Average Order Quantity")
+```
+
+**Insights:** - **China (CN) has the highest average order quantity**, significantly surpassing all other countries. - Most other countries have **uniformly low average order quantities**, suggesting **smaller-scale operations**. - The **large gap between China and other countries** indicates a strong **bulk order trend** from Chinese suppliers.
+
+------------------------------------------------------------------------
+
+### **4️⃣ Do suppliers with higher ratings tend to have lower or higher prices?**
+
+```{r}
+# Scatter Plot: Supplier Rating vs. Average Price
+ggplot(df, aes(x = supplier_rating, y = avg_price)) +
+  geom_point(alpha = 0.5, color = "blue") +
+  geom_smooth(method = "lm", color = "red") +
+  labs(title = "Supplier Rating vs. Average Price",
+       x = "Supplier Rating",
+       y = "Average Price") +
+  theme_minimal()
+```
+
+**Insights:** - **No strong relationship between supplier rating and price**. - **Higher-rated suppliers do not necessarily charge higher prices**. - Some **low-rated suppliers have high prices**, which may indicate **brand reputation or premium products**.
+
+------------------------------------------------------------------------
+
+### **5️⃣ Which suppliers have the highest price variations (difference between min and max price)?**
+
+```{r}
+library(gt)
+
+# Calculating average price spread for each supplier
+df |> 
+  group_by(supplier_name) |> 
+  summarise(avg_price_spread = mean(price_spread, na.rm = TRUE)) |> 
+  arrange(desc(avg_price_spread)) |> 
+  head(10) |> 
+  gt() |> 
+  tab_header(title = "Top 10 Suppliers by Average Price Variation")
+```
+
+**Insights:** - **Guangdong Songtao Co., Ltd. has the highest average price spread**, suggesting significant pricing flexibility. - **A steep drop in price variation after the top supplier** indicates that few suppliers operate with highly dynamic pricing. - Suppliers with **higher average price variation may offer better negotiation opportunities** for bulk purchases. - The presence of suppliers with **moderate pricing variability** suggests a mix of fixed and dynamic pricing strategies in the market.
+
+## **Statistical Test**
+
+### **T-Test: Is there a significant difference in average order quantity between verified and non-verified suppliers?**
+
+-   T-test is used when comparing two groups (verified vs. non-verified suppliers).
+-   We'll check if there is a significant difference in order quantity between these two groups.
+-   We'll first check normality (Shapiro-Wilk test) and variance equality (Levene's test) before running the independent t-test.
+
+```{r}
+
+
+# Check normality of order quantity for both groups
+shapiro.test(df$log_order_quantity[df$verification_status == "Verified"])
+shapiro.test(df$log_order_quantity[df$verification_status == "Not Verified"])
+
+# Check variance equality using Levene's test
+leveneTest(log_order_quantity ~ verification_status, data = df)
+
+# Perform independent T-test (Welch's T-test for unequal variances)
+t_test_result <- t.test(log_order_quantity ~ verification_status, data = df, var.equal = FALSE)
+print(t_test_result)
+```
+
+**Insights from T-Test Analysis**
+
+-   **Normality Check (Shapiro-Wilk Test):** Both verified and non-verified suppliers' log-transformed order quantities are **not normally distributed** (p \< 0.05).
+-   **Variance Check (Levene’s Test):** Variances are **highly unequal** (p \< 2.2e-16), so **Welch’s T-test** is used.
+-   **T-Test Results:**
+    -   **p-value = 1.347e-07** → **Statistically significant** at the 0.05 level.\
+    -   **Mean Log Orders:** Verified (2.1645) vs. Non-Verified (1.9033).\
+    -   **95% Confidence Interval (-0.3581, -0.1644)** does **not include zero**, confirming a significant difference.
+
+**Conclusion:**
+
+-   **Verified suppliers receive significantly higher order quantities** than non-verified suppliers (**p \< 0.05**).
+-   The difference is **statistically significant**, meaning verification **has a real impact on sales**.
+-   **Business Implication:** **Verification status is important for increasing orders**. Non-verified suppliers might benefit from **getting verified** to boost credibility and sales.
+
+------------------------------------------------------------------------
+
+### **ANOVA: Does the supplier experience level (New, Growing, Established) impact average order quantity?**
+
+-   ANOVA is used when comparing **more than two groups**.
+-   Here, we check if **order quantity differs** across **supplier experience levels** (`New`, `Growing`, `Established`).
+-   If ANOVA is **significant**, we perform **Tukey's HSD test** for pairwise comparisons.
+
+```{r}
+
+# Check normality for each experience level
+shapiro.test(df$log_order_quantity[df$experience_category == "New"])
+shapiro.test(df$log_order_quantity[df$experience_category == "Growing"])
+shapiro.test(df$log_order_quantity[df$experience_category == "Established"])
+
+# Check variance equality using Levene's test
+leveneTest(log_order_quantity ~ experience_category, data = df)
+
+# Perform ANOVA
+anova_result <- aov(log_order_quantity ~ experience_category, data = df)
+summary(anova_result)
+
+# Perform Tukey HSD post-hoc test if ANOVA is significant
+tukey_result <- TukeyHSD(anova_result)
+print(tukey_result)
+```
+
+**Insights from ANOVA Analysis**
+
+-   **Normality Check (Shapiro-Wilk Test):** Log-transformed order quantity is **not normally distributed** across all experience levels.
+-   **Variance Check (Levene’s Test):** Variances **are highly unequal** (p \< 2.2e-16), but ANOVA remains robust.
+-   **ANOVA Results:**
+    -   **p-value \< 0.05** → Supplier experience **significantly impacts order quantity**.
+-   **Tukey’s HSD Test Results:**
+    -   **New vs. Established:** p \< 0.0001 (**Significant**) → Established suppliers receive significantly more orders than New suppliers.
+    -   **New vs. Growing:** p \< 0.0001 (**Significant**) → Growing suppliers also receive more orders than New suppliers.
+    -   **Growing vs. Established:** p = 0.9892 (**Not Significant**) → No major difference between these two groups.
+
+**Conclusion:**
+
+-   **Supplier experience significantly affects order quantity** (ANOVA p \< 0.05).
+-   **New suppliers receive significantly fewer orders** than **Growing and Established suppliers**.
+-   **No significant difference between Growing and Established suppliers**, meaning sales stabilize after a certain experience level.
+-   **Business Implication:** **New suppliers should focus on building credibility** through better pricing, promotions, and customer engagement to compete with experienced suppliers.
+
+### **ANOVA: Do suppliers from different countries have significantly different average prices?**
+
+-   ANOVA is used to check if **average price varies significantly** between suppliers from different countries.
+-   If ANOVA is **significant**, we perform **Tukey's HSD test** for pairwise comparisons.
+
+```{r}
+# Compute avg_price if not already computed
+df$avg_price <- (df$min_price + df$max_price) / 2
+
+# Check normality of average price\shapiro.test(df$avg_price)
+
+# Check variance equality using Levene's test
+leveneTest(avg_price ~ supplier_country, data = df)
+
+# Perform ANOVA
+anova_country <- aov(avg_price ~ supplier_country, data = df)
+summary(anova_country)
+
+# Perform Tukey HSD post-hoc test if ANOVA is significant
+tukey_country <- TukeyHSD(anova_country)
+print(tukey_country)
+
+# Boxplot visualization of price differences across supplier countries
+ggplot(df, aes(x = supplier_country, y = avg_price)) +
+  geom_boxplot(fill = "lightblue", outlier.color = "red") +
+  labs(title = "Average Price Distribution Across Supplier Countries",
+       x = "Supplier Country",
+       y = "Average Price") +
+  theme_minimal()
+```
+
+**Insights from ANOVA Analysis**
+
+-   **No significant difference in average prices across supplier countries** (**p = 0.9495**).
+-   **Levene’s test confirms equal variances**, making ANOVA results reliable.
+-   **Despite price variations in some countries (outliers in the boxplot), overall pricing remains similar globally**.
+-   **Business Implication:** Country of origin **does not strongly influence pricing**—buyers should focus more on **quality, supplier reputation, and order quantity** rather than geographical pricing trends.
+
+### **Pearson and Spearman Correlation test: Does review count correlate with order quantity?**
+
+```{r}
+library(ggplot2)
+
+# Check normality of order quantity and review count
+shapiro.test(df$log_order_quantity)
+shapiro.test(df$review_count)
+
+# Compute Pearson and Spearman correlation
+cor_pearson <- cor.test(df$log_order_quantity, df$review_count, method = "pearson")
+cor_spearman <- cor.test(df$log_order_quantity, df$review_count, method = "spearman")
+
+# Perform Linear Regression
+lm_model <- lm(log_order_quantity ~ review_count, data = df)
+summary(lm_model)
+
+# Extract regression coefficients
+intercept <- coef(lm_model)[1]
+slope <- coef(lm_model)[2]
+eq_label <- paste0("y = ", round(slope, 4), "x + ", round(intercept, 4),
+                   "\nPearson r = ", round(cor_pearson$estimate, 4))
+
+# Scatter plot with regression line and equation
+ggplot(df, aes(x = review_count, y = log_order_quantity)) +
+  geom_point(alpha = 0.5, color = "blue") +
+  geom_smooth(method = "lm", color = "red") +
+  annotate("text", x = max(df$review_count) * 0.7, y = max(df$log_order_quantity) * 0.9,
+           label = eq_label, color = "black", size = 5, hjust = 0) +
+  labs(title = "Review Count vs. Log Order Quantity",
+       x = "Review Count",
+       y = "Log(Order Quantity)") +
+  theme_minimal()
+
+```
+**Correlation Analysis: Review Count & Log Order Quantity**
+
+- The Shapiro-Wilk test confirms that both log-transformed order quantity and review count are not normally distributed (p < 0.0001), making Spearman correlation the more reliable measure.
+- Pearson (r = 0.238, p < 0.0001) and Spearman (r = 0.121, p < 0.0001) correlations indicate a weak but statistically significant positive relationship between review count and order quantity.
+- The regression model (y = 0.0098x + 1.7343) suggests that each additional review slightly increases log order quantity.
+- A low R² value indicates that review count alone is not a strong predictor of sales.
+
+**Conclusion**
+- More reviews slightly contribute to higher order volumes, but their impact is minimal.
+- Other factors like pricing, supplier experience, and product reputation play a much larger role in sales.
+- Suppliers should encourage reviews but also focus on pricing, product differentiation, and marketing strategies for better sales outcomes.
+
+## **Integration with Python**
+
+### **Demonstrating Communication Between R and Python Using Quarto**
+
+Quarto allows us to execute both R and Python in the same document, enabling seamless communication between the two languages.
+
+```{r}
+# Load reticulate package
+library(reticulate)
+
+# Show Python configuration
+py_config()
+```
+
+
+------------------------------------------------------------------------
+
+### **Which supplier countries have the highest total and average order quantities for each verification status?**
+
+```{python}
+import pandas as pd
+df_py = r.df
+
+# Group by supplier country and verification status
+order_quantity_by_country = df_py.groupby(["supplier_country", "verification_status"]).agg(
+    total_orders = ("order_quantity", "sum"),
+    avg_orders = ("order_quantity", "mean")
+).reset_index()
+
+# Display result
+print(order_quantity_by_country.head())
+```
+
+**Insights:**
+
+-   **China (CN) dominates both total and average order quantities**, regardless of verification status.
+-   **Verified suppliers tend to receive higher average order quantities**, showing the importance of trust in supplier selection.
+-   **Smaller markets like HK, IN, and JP have significantly lower total orders**, indicating a regional preference in sourcing.
+
+### **How do supplier experience levels impact pricing strategies across countries?**
+
+```{python}
+# Group by supplier country and experience category
+pricing_by_experience = df_py.groupby(["supplier_country", "experience_category"]).agg(
+    avg_min_price=("min_price", "mean"),
+    avg_max_price=("max_price", "mean"),
+    avg_price=("avg_price", "mean")
+).reset_index()
+
+# Display result
+print(pricing_by_experience.head())
+```
+
+**Insights:**
+
+-   **Established suppliers in China set the highest average prices**, while newer suppliers adopt **lower pricing strategies** to compete.
+-   **Suppliers in Hong Kong have much lower price ranges**, likely indicating a different market positioning or cost structure.
+-   **Pricing varies based on supplier experience, with experienced suppliers likely charging a premium for reputation and reliability.**
+
+### **What is the distribution of order quantities across different price ranges?**
+
+```{python}
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Categorize avg_price into Low, Medium, High price ranges
+q1, q2 = df_py["avg_price"].quantile([0.33, 0.66])
+
+def categorize_price(price):
+    if price <= q1:
+        return "Low"
+    elif price <= q2:
+        return "Medium"
+    else:
+        return "High"
+
+df_py["price_range"] = df_py["avg_price"].apply(categorize_price)
+
+# Aggregate order quantity by price range
+order_quantity_by_price = df_py.groupby("price_range")["order_quantity"].agg(["mean", "sum", "count"]).reset_index()
+
+# Visualization
+plt.figure(figsize=(8, 5))
+sns.barplot(x="price_range", y="mean", data=order_quantity_by_price, palette="Blues")
+plt.title("Average Order Quantity Across Price Ranges")
+plt.xlabel("Price Range")
+plt.ylabel("Average Order Quantity")
+plt.show()
+```
+
+**📌 Insights:**
+
+-   **Low and Medium price ranges receive the highest order volumes**, while **high-priced products see lower demand**.
+-   **Bulk purchasing behavior favors affordability**, reinforcing the trend of customers preferring cost-effective solutions.
+-   **Suppliers targeting high sales volumes should optimize pricing for the lower segments.**
+
+## **SQL Integration**
+```{r}
+library(DBI)
+library(RSQLite)
+```
+
+**Connect to SQLite Database **
+
+```{r}
+db_file <- "artificial_flower_db.sqlite"
+conn <- dbConnect(SQLite(), db_file)
+```
+
+**Store Data in SQLite **
+
+```{r}
+# Remove existing table if it exists
+dbExecute(conn, "DROP TABLE IF EXISTS flower_data")
+```
+
+```{r}
+# Create new table and write data
+dbWriteTable(conn, "flower_data", df, overwrite = TRUE, row.names = FALSE)
+```
+
+**Retrieve Data for Analysis **
+
+```{r}
+# Fetch all data
+query_all <- dbGetQuery(conn, "SELECT * FROM flower_data LIMIT 5")
+print(query_all)
+```
+### **top suppliers with highest average order quantity? **
+```{r}
+# Fetch top suppliers with highest average order quantity
+query_top_suppliers <- dbGetQuery(conn, "
+    SELECT supplier_name, 
+           AVG(CAST(REPLACE(order_quantity, ' orders', '') AS FLOAT)) AS avg_order_quantity
+    FROM flower_data
+    WHERE order_quantity IS NOT NULL AND order_quantity != ''
+    GROUP BY supplier_name
+    ORDER BY avg_order_quantity DESC
+    LIMIT 5
+")
+print(query_top_suppliers)
+```
+
+**Insights:**
+
+-   Henan Huaxin Import & Export Trade Co., Ltd. leads with 7000 orders.
+-   Significant gap between the 1st and 2nd supplier.
+-   The top 3 suppliers dominate the market.
+-   Business Implication: Competitors should analyze top suppliers' strategies.
+
+### **How do average, minimum, and maximum prices vary across different supplier countries?**
+```{r}
+# Fetch price trends by country
+query_price_trends <- dbGetQuery(conn, "
+    SELECT supplier_country, 
+           avg(avg_price) avgprice, 
+           min(min_price) minprice, 
+           max(max_price) maxprice
+    FROM flower_data
+    GROUP BY supplier_country
+    ORDER BY avg_price DESC
+")
+print(query_price_trends)
+```
+
+**Insights from Price Trends by Country**
+
+-   **China (CN) has the highest average price (29.04)** but also the **widest price range (0.01 to 4500.00)**, indicating a mix of low-cost and premium-priced suppliers.
+-   **India (IN) follows with an average price of 22.66**, with prices ranging from **0.10 to 1000.00**, showing a diverse pricing structure.
+-   **Malaysia (MY) has the highest average price (70.38)**, but its maximum price (200.00) is much lower than China's, suggesting **a more standardized pricing model**.
+-   **Turkey (TR), Thailand (TH), and Japan (JP)** have relatively lower max prices, indicating **a more controlled pricing strategy**.
+-   **Vietnam (VN), Taiwan (TW), and Hong Kong (HK) have the lowest average prices**, suggesting these markets may focus more on **budget-friendly or low-cost products**.
+-   **Business Implication:** **Suppliers from China and India** offer a wide range of prices, making them suitable for **both budget and high-end buyers**. **Malaysia has a consistently high average price**, indicating a focus on premium products. **Buyers looking for cost-effective sourcing** may consider **Vietnam, Taiwan, or Hong Kong** for lower-cost alternatives.
+
+```{r}
+
+# --- 4. Close Database Connection ---
+dbDisconnect(conn)
+```
+
+## **Business Insights and Recommendations**
+
+### **Business Insights**
+
+1.  **Order Quantity Trends**
+    -   Order quantities are **highly skewed**, with a **few suppliers receiving bulk orders** while most get **low to moderate sales**.\
+    -   **Extreme outliers exist**, suggesting **some suppliers dominate the market**.
+2.  **Price Analysis**
+    -   **Wide variation in pricing strategies** among suppliers, with some using **low minimum prices** to attract customers while others maintain **high price spreads**.\
+    -   **No strong correlation between price and order quantity**, indicating that **customers do not always buy based on the lowest price**.
+3.  **Supplier Verification Impact**
+    -   **Verified suppliers receive significantly higher order volumes** than non-verified ones, confirming **buyer trust in verification status**.
+4.  **Supplier Experience & Order Quantity**
+    -   **Experienced suppliers receive higher order quantities**, while **new suppliers struggle to gain traction**.\
+    -   **No major difference between Growing and Established suppliers**, indicating **order volume stabilizes after 3-7 years in business**.
+5.  **Country-Wise Supplier Performance**
+    -   **China (CN) dominates in both total and average order volumes**, while **other countries show significantly lower averages**.\
+    -   **Suppliers from other regions may cater to niche markets or higher-priced segments**.
+6.  **Supplier Rating & Review Count Impact**
+    -   **Review count is positively correlated with order quantity**, while **rating alone does not drive more sales**.\
+    -   **Suppliers with more reviews tend to have higher credibility**.
+7.  **Pricing Strategies of High-Volume Suppliers**
+    -   **Mid-range pricing is the most effective**, as **suppliers with extreme low or high prices do not have the highest order volumes**.
+8.  **Minimum Order Quantity (MOQ) Trends**
+    -   **Suppliers with lower MOQs attract more buyers**, while **high MOQs limit flexibility and discourage orders**.
+9.  **Price Variation Among Suppliers**
+    -   Some suppliers have **extreme price ranges**, which could indicate **bulk pricing discounts or inconsistent pricing strategies**.\
+    -   Suppliers with **stable pricing attract more consistent buyers**.
+10. **Review Count and Supplier Longevity**\
+
+-   Older suppliers have higher review counts**, confirming** credibility builds over time\*\*.\
+-   Some new suppliers get high reviews quickly**, suggesting** strong early-stage marketing or aggressive promotion strategies\*\*.
+
+------------------------------------------------------------------------
+
+### **Business Recommendations**
+
+1.  **Encourage Supplier Verification**
+    -   Since **verified suppliers receive more orders**, I recommend **incentivizing non-verified suppliers to get verified** through promotional benefits.
+2.  **Promote Bulk Purchasing**
+    -   Suppliers should **offer volume-based discounts** to **increase order sizes**.
+3.  **Optimize Pricing Strategies**
+    -   **Avoid extreme pricing (too low or too high)**—**mid-range pricing attracts the most sales**.\
+    -   **Analyze competitive pricing trends** and **adjust pricing strategies** based on market demand.
+4.  **Encourage Customer Reviews**
+    -   **Suppliers should actively collect and showcase reviews** to build credibility.\
+    -   **Providing incentives (discounts, loyalty programs) to buyers who leave reviews** can increase engagement.
+5.  **Analyze Supplier Experience and Performance**
+    -   **New suppliers should use promotional strategies** to gain traction.\
+    -   **Growing suppliers should focus on customer retention and branding** to transition into Established status.
+6.  **Leverage Country-Based Supplier Trends**
+    -   **Bulk buyers should prioritize China-based suppliers**, as they **dominate in order volume**.\
+    -   **For niche or premium markets, suppliers from other regions may offer unique advantages**.
+7.  **Encourage Flexible Minimum Order Quantities (MOQs)**
+    -   **Lower MOQ requirements attract more buyers**, so suppliers should **offer flexible order options**.\
+    -   **Bulk sellers should provide tiered pricing models** for different order sizes.
+8.  **Standardize Pricing Strategies**
+    -   Suppliers with **large price variations should ensure clear bulk pricing tiers** to avoid confusion.
+9.  **Strategic Marketing for New Suppliers**
+    -   **New suppliers should focus on aggressive marketing and promotions** to **quickly build credibility and reviews**.\
+    -   **Older suppliers should leverage their existing reputation to maintain competitive advantage**.
+
+------------------------------------------------------------------------
+
+## **Conclusion**
+
+Through my **data-driven analysis**, I have identified key insights into **supplier performance, pricing strategies, verification impact, and order quantity trends**.
+
+-   **Verified and experienced suppliers receive more orders**, reinforcing the importance of **credibility and trust-building**.\
+-   **Price alone does not determine order volume**—other factors like **review count, supplier experience, and verification status play crucial roles**.\
+-   **Bulk orders are concentrated among a few top suppliers**, emphasizing the need for **competitive pricing and promotions**.\
+-   **China dominates supplier order volumes**, but **other countries cater to niche markets**.
+
+### **Strategic Actions:**
+
+-   **Encourage verification for increased sales**\
+-   **Adjust pricing to mid-range levels for better market positioning**\
+-   **Use review collection strategies to enhance trust**\
+-   **Offer bulk pricing and flexible MOQs to attract more buyers**
+
+By implementing these recommendations, I believe businesses can **optimize supplier selection, pricing models, and customer engagement strategies** to maximize success in the **artificial flower e-commerce market**.
